@@ -58,15 +58,26 @@ OCR_SEMANTIC_ENABLED = os.getenv("OCR_SEMANTIC_ENABLED", "true").lower() in ("tr
 _default_ui_layout = Path(__file__).resolve().parent / "vision" / "tradingview_ui_layout.default.json"
 TRADINGVIEW_UI_LAYOUT_PATH = os.getenv("TRADINGVIEW_UI_LAYOUT_PATH", str(_default_ui_layout))
 
-# Chart data: vision = screenshot OCR only; binance = crypto OHLCV from Binance public API (fast);
-# hybrid = API for crypto when possible + OCR fills gaps (YOLO still uses screenshot)
-CHART_DATA_SOURCE = os.getenv("CHART_DATA_SOURCE", "hybrid").strip().lower()
+# Chart data (API / venue first recommended):
+#   api_first = REST OHLCV for crypto + OCR only for gaps; API wins on price fields vs pixels
+#   hybrid    = merge API + OCR; binance = API-only when possible; vision = OCR only
+CHART_DATA_SOURCE = os.getenv("CHART_DATA_SOURCE", "api_first").strip().lower()
 BINANCE_PUBLIC_BASE_URL = os.getenv(
     "BINANCE_PUBLIC_BASE_URL", "https://api.binance.com"
 ).rstrip("/")
-# When hybrid/binance API returns OHLCV, skip slow OCR on screenshot (YOLO still runs)
+# When API returns OHLCV, skip slow OCR on screenshot (YOLO still uses screenshot unless disabled below)
 CHART_DATA_SKIP_OCR_WHEN_API = os.getenv(
     "CHART_DATA_SKIP_OCR_WHEN_API", "true"
+).lower() in ("true", "1", "yes")
+# Fetch Binance klines before opening browser (lower latency when both run)
+CHART_FETCH_API_BEFORE_BROWSER = os.getenv(
+    "CHART_FETCH_API_BEFORE_BROWSER", "true"
+).lower() in ("true", "1", "yes")
+# Run YOLO on screenshot (pattern / UI context). Set false for pure API path when skipping browser.
+SCAN_USE_YOLO = os.getenv("SCAN_USE_YOLO", "true").lower() in ("true", "1", "yes")
+# If true + crypto + API ok + YOLO off: skip TradingView browser entirely (fastest; no chart patterns)
+SCAN_SKIP_BROWSER_WHEN_API_ONLY = os.getenv(
+    "SCAN_SKIP_BROWSER_WHEN_API_ONLY", "false"
 ).lower() in ("true", "1", "yes")
 
 # Browser Configuration
@@ -79,6 +90,13 @@ MAX_POSITION_SIZE = float(os.getenv("MAX_POSITION_SIZE", "0.02"))  # 2% of portf
 MAX_DAILY_LOSS = float(os.getenv("MAX_DAILY_LOSS", "0.05"))  # 5% daily loss limit
 STOP_LOSS_PERCENTAGE = float(os.getenv("STOP_LOSS_PERCENTAGE", "0.02"))  # 2% stop loss
 TAKE_PROFIT_PERCENTAGE = float(os.getenv("TAKE_PROFIT_PERCENTAGE", "0.04"))  # 4% take profit
+
+# Stricter sizing: approximate round-trip fees + spread + slippage (basis points; 100 bps = 1%)
+RISK_APPLY_FRICTION = os.getenv("RISK_APPLY_FRICTION", "true").lower() in ("true", "1", "yes")
+RISK_FEE_ROUND_TRIP_BPS = float(os.getenv("RISK_FEE_ROUND_TRIP_BPS", "20"))
+RISK_SPREAD_BPS = float(os.getenv("RISK_SPREAD_BPS", "10"))
+RISK_SLIPPAGE_BPS = float(os.getenv("RISK_SLIPPAGE_BPS", "10"))
+RISK_FRICTION_BPS = RISK_FEE_ROUND_TRIP_BPS + RISK_SPREAD_BPS + RISK_SLIPPAGE_BPS
 
 # Market Configuration
 DEFAULT_MARKETS = os.getenv("DEFAULT_MARKETS", "crypto,stocks,commodities").split(",")
@@ -136,7 +154,15 @@ def validate_config() -> bool:
 
     if CIRCUIT_BREAKER_FAILURE_THRESHOLD < 1:
         errors.append("CIRCUIT_BREAKER_FAILURE_THRESHOLD must be >= 1")
-    
+
+    _chart_sources = ("vision", "binance", "hybrid", "api_first")
+    if CHART_DATA_SOURCE not in _chart_sources:
+        errors.append(
+            f"CHART_DATA_SOURCE must be one of {_chart_sources}, got {CHART_DATA_SOURCE!r}"
+        )
+    if RISK_FEE_ROUND_TRIP_BPS < 0 or RISK_SPREAD_BPS < 0 or RISK_SLIPPAGE_BPS < 0:
+        errors.append("RISK_*_BPS values must be non-negative")
+
     if errors:
         for error in errors:
             logging.error(f"Configuration error: {error}")
@@ -171,6 +197,14 @@ def get_config_summary() -> dict:
         "ocr_full_panel": OCR_FULL_PANEL,
         "chart_data_source": CHART_DATA_SOURCE,
         "binance_public_base_url": BINANCE_PUBLIC_BASE_URL,
+        "chart_fetch_api_before_browser": CHART_FETCH_API_BEFORE_BROWSER,
+        "scan_use_yolo": SCAN_USE_YOLO,
+        "scan_skip_browser_when_api_only": SCAN_SKIP_BROWSER_WHEN_API_ONLY,
+        "risk_apply_friction": RISK_APPLY_FRICTION,
+        "risk_friction_bps": RISK_FRICTION_BPS if RISK_APPLY_FRICTION else 0,
+        "risk_fee_round_trip_bps": RISK_FEE_ROUND_TRIP_BPS,
+        "risk_spread_bps": RISK_SPREAD_BPS,
+        "risk_slippage_bps": RISK_SLIPPAGE_BPS,
     }
 
 # Startup warning for live trading

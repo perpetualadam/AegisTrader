@@ -15,7 +15,7 @@ from assets import AssetManager, Asset, MarketType
 from market_sessions import MarketSession, get_active_markets
 from vision.yolo_detector import YOLODetector
 from vision.ocr_reader import OCRReader
-from strategy.strategy_engine import StrategyEngine, SignalType
+from strategy.strategy_engine import StrategyEngine, SignalType, StrategyType, TradingSignal
 from execution.execution import Execution, OrderType
 from risk.risk_manager import RiskManager
 from broker.broker_api import MockBrokerAPI
@@ -121,6 +121,37 @@ class TestRisk:
         rm = RiskManager()
         assert rm.max_position_size > 0
         assert rm.max_daily_loss > 0
+
+    def test_friction_widens_risk_and_reduces_size(self):
+        """Higher RISK_FRICTION_BPS increases effective per-unit risk → smaller size."""
+        asset = Asset(
+            symbol="BTCUSDT",
+            name="Bitcoin",
+            market_type=MarketType.CRYPTO,
+            tradingview_ticker="BINANCE:BTCUSDT",
+            exchange="Binance",
+        )
+        signal = TradingSignal(
+            asset=asset,
+            signal_type=SignalType.BUY,
+            strategy=StrategyType.MOMENTUM,
+            confidence=0.8,
+            entry_price=100.0,
+            stop_loss=98.0,
+        )
+        rm = RiskManager()
+        # Raise cap so risk-based size is binding (default 2% max would mask friction)
+        rm.max_position_size = 1.0
+        with patch("risk.risk_manager.RISK_APPLY_FRICTION", True), patch(
+            "risk.risk_manager.RISK_FRICTION_BPS", 0.0
+        ):
+            s0 = rm._calculate_position_size(signal, 10000.0)
+        with patch("risk.risk_manager.RISK_APPLY_FRICTION", True), patch(
+            "risk.risk_manager.RISK_FRICTION_BPS", 500.0
+        ):
+            s1 = rm._calculate_position_size(signal, 10000.0)
+        assert s0 > 0 and s1 > 0
+        assert s1 < s0
 
 class TestBroker:
     """Test broker API."""

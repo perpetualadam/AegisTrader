@@ -75,6 +75,23 @@ def _merge_api_first(api: Optional[PriceData], ocr: Optional[PriceData]) -> Opti
         setattr(out, attr, av if av is not None else ov)
     return out
 
+
+def _merge_api_strict(api: Optional[PriceData], ocr: Optional[PriceData]) -> Optional[PriceData]:
+    """API-first mode: venue OHLCV is authoritative; OCR only fills gaps (same merge rule as hybrid)."""
+    return _merge_api_first(api, ocr)
+
+
+def _try_binance_klines(asset: Asset, timeframe: str) -> Optional[PriceData]:
+    try:
+        from broker.symbol_resolver import resolve_venue_symbol
+        from market_data.binance_public import fetch_binance_kline_as_price_data
+
+        sym = resolve_venue_symbol(asset.tradingview_ticker, "binance")
+        return fetch_binance_kline_as_price_data(sym, timeframe)
+    except Exception as e:
+        logger.debug("Market data API skipped: %s", e)
+        return None
+
 @dataclass
 class ScanResult:
     """Result of scanning a single asset."""
@@ -82,6 +99,8 @@ class ScanResult:
     timestamp: float
     price_data: Optional[PriceData] = None
     chart_data_source: str = "vision"
+    # Where execution / signal prices come from: api (venue REST), ocr (pixels), merged (API+OCR)
+    decision_price_source: str = "unknown"
     ui_semantic: Optional[UISemanticReading] = None
     pattern_analysis: Optional[Dict] = None
     technical_score: float = 0.0
@@ -157,59 +176,87 @@ class MarketScanner:
             if not self.market_session.is_market_open(asset.market_type):
                 result.errors.append(f"Market {asset.market_type.value} is closed")
                 return result
-            
-            # Open chart in browser
-            if self.browser_controller:
+
+            try:
+                from config import (
+                    CHART_DATA_SOURCE,
+                    CHART_DATA_SKIP_OCR_WHEN_API,
+                    CHART_FETCH_API_BEFORE_BROWSER,
+                    SCAN_USE_YOLO,
+                    SCAN_SKIP_BROWSER_WHEN_API_ONLY,
+                )
+            except ImportError:
+                CHART_DATA_SOURCE = "vision"
+                CHART_DATA_SKIP_OCR_WHEN_API = False
+                CHART_FETCH_API_BEFORE_BROWSER = True
+                SCAN_USE_YOLO = True
+                SCAN_SKIP_BROWSER_WHEN_API_ONLY = False
+
+            src = (CHART_DATA_SOURCE or "vision").strip().lower()
+            use_crypto_api = (
+                src in ("binance", "hybrid", "api_first")
+                and asset.market_type == MarketType.CRYPTO
+            )
+
+            api_pd: Optional[PriceData] = None
+            if use_crypto_api and CHART_FETCH_API_BEFORE_BROWSER:
+                api_pd = _try_binance_klines(asset, timeframe)
+
+            skip_browser = (
+                SCAN_SKIP_BROWSER_WHEN_API_ONLY
+                and api_pd is not None
+                and asset.market_type == MarketType.CRYPTO
+                and not SCAN_USE_YOLO
+            )
+
+            ocr_merged: Optional[PriceData] = None
+
+            if not skip_browser:
+                if not self.browser_controller:
+                    result.errors.append("Browser controller not available")
+                    return result
                 success = self.browser_controller.open_chart(asset.tradingview_ticker, timeframe)
                 if not success:
                     result.errors.append("Failed to open chart in browser")
                     return result
-                
-                # Take screenshot
+
                 result.screenshot_path = self.browser_controller.take_screenshot(
                     f"{asset.symbol}_{timeframe}_{int(start_time)}.png"
                 )
-                
                 if not result.screenshot_path:
                     result.errors.append("Failed to take screenshot")
                     return result
+
+                if use_crypto_api and not CHART_FETCH_API_BEFORE_BROWSER:
+                    api_pd = _try_binance_klines(asset, timeframe)
+
+                if SCAN_USE_YOLO and self.yolo_detector and result.screenshot_path:
+                    result.pattern_analysis = self.yolo_detector.analyze_chart_screenshot(
+                        result.screenshot_path
+                    )
+                    if result.pattern_analysis and "error" in result.pattern_analysis:
+                        result.errors.append(
+                            f"YOLO analysis failed: {result.pattern_analysis['error']}"
+                        )
             else:
-                result.errors.append("Browser controller not available")
-                return result
-            
-            # Analyze screenshot with YOLO
-            if self.yolo_detector and result.screenshot_path:
-                result.pattern_analysis = self.yolo_detector.analyze_chart_screenshot(result.screenshot_path)
-                if 'error' in result.pattern_analysis:
-                    result.errors.append(f"YOLO analysis failed: {result.pattern_analysis['error']}")
-            
-            # Price data: optional fast Binance public klines (crypto) + OCR merge
-            try:
-                from config import CHART_DATA_SOURCE, CHART_DATA_SKIP_OCR_WHEN_API
-            except ImportError:
-                CHART_DATA_SOURCE = "vision"
-                CHART_DATA_SKIP_OCR_WHEN_API = False
-
-            api_pd = None
-            if CHART_DATA_SOURCE in ("binance", "hybrid") and asset.market_type == MarketType.CRYPTO:
-                try:
-                    from broker.symbol_resolver import resolve_venue_symbol
-                    from market_data.binance_public import fetch_binance_kline_as_price_data
-
-                    sym = resolve_venue_symbol(asset.tradingview_ticker, "binance")
-                    api_pd = fetch_binance_kline_as_price_data(sym, timeframe)
-                except Exception as e:
-                    logger.debug("Market data API skipped: %s", e)
+                result.pattern_analysis = None
+                result.screenshot_path = None
 
             skip_ocr = False
             if api_pd:
-                if CHART_DATA_SOURCE == "binance":
+                if src == "binance":
                     skip_ocr = True
-                elif CHART_DATA_SOURCE == "hybrid" and CHART_DATA_SKIP_OCR_WHEN_API:
+                elif src == "hybrid" and CHART_DATA_SKIP_OCR_WHEN_API:
+                    skip_ocr = True
+                elif src == "api_first":
                     skip_ocr = True
 
-            ocr_merged = None
-            if self.ocr_reader and result.screenshot_path and not skip_ocr:
+            if (
+                not skip_browser
+                and self.ocr_reader
+                and result.screenshot_path
+                and not skip_ocr
+            ):
                 import cv2
 
                 image = cv2.imread(result.screenshot_path)
@@ -225,25 +272,46 @@ class MarketScanner:
                 else:
                     result.errors.append("Could not load screenshot for OCR")
 
-            if CHART_DATA_SOURCE == "vision":
+            if skip_browser:
+                result.price_data = api_pd
+                result.chart_data_source = "binance_public_api"
+                result.decision_price_source = "api"
+            elif src == "vision":
                 result.price_data = ocr_merged
                 result.chart_data_source = "vision_ocr"
-            elif CHART_DATA_SOURCE == "binance":
+                result.decision_price_source = "ocr"
+            elif src == "binance":
                 result.price_data = api_pd or ocr_merged
                 result.chart_data_source = (
                     "binance_public_api" if api_pd else "vision_ocr"
                 )
-            elif CHART_DATA_SOURCE == "hybrid":
+                result.decision_price_source = "api" if api_pd else "ocr"
+            elif src == "hybrid":
                 result.price_data = _merge_api_first(api_pd, ocr_merged)
                 if api_pd and ocr_merged:
                     result.chart_data_source = "hybrid_api+ocr"
+                    result.decision_price_source = "merged"
                 elif api_pd:
                     result.chart_data_source = "binance_public_api"
+                    result.decision_price_source = "api"
                 else:
                     result.chart_data_source = "vision_ocr"
+                    result.decision_price_source = "ocr"
+            elif src == "api_first":
+                result.price_data = _merge_api_strict(api_pd, ocr_merged)
+                if api_pd and ocr_merged:
+                    result.chart_data_source = "api_first_api+ocr"
+                    result.decision_price_source = "merged"
+                elif api_pd:
+                    result.chart_data_source = "binance_public_api"
+                    result.decision_price_source = "api"
+                else:
+                    result.chart_data_source = "vision_ocr"
+                    result.decision_price_source = "ocr"
             else:
                 result.price_data = ocr_merged
                 result.chart_data_source = "vision_ocr"
+                result.decision_price_source = "ocr"
             
             # Calculate scores
             result.technical_score = self._calculate_technical_score(result)

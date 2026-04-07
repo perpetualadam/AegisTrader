@@ -9,7 +9,14 @@ from typing import Dict, List, Optional, Any
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 
-from config import MAX_POSITION_SIZE, MAX_DAILY_LOSS, STOP_LOSS_PERCENTAGE, TAKE_PROFIT_PERCENTAGE
+from config import (
+    MAX_POSITION_SIZE,
+    MAX_DAILY_LOSS,
+    STOP_LOSS_PERCENTAGE,
+    TAKE_PROFIT_PERCENTAGE,
+    RISK_APPLY_FRICTION,
+    RISK_FRICTION_BPS,
+)
 from assets import Asset
 from strategy.strategy_engine import TradingSignal
 
@@ -119,8 +126,11 @@ class RiskManager:
         # Risk amount (2% of balance)
         risk_amount = account_balance * 0.02
         
-        # Price risk per unit
+        # Price risk per unit (widen by fees/spread/slippage when RISK_APPLY_FRICTION)
         price_risk = abs(signal.entry_price - signal.stop_loss)
+        if RISK_APPLY_FRICTION and signal.entry_price and RISK_FRICTION_BPS > 0:
+            friction = signal.entry_price * (RISK_FRICTION_BPS / 10000.0)
+            price_risk += friction
         if price_risk <= 0:
             return 0.0
         
