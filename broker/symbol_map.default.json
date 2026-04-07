@@ -1,0 +1,14 @@
+{
+  "mappings": {
+    "BINANCE:BTCUSDT": { "binance": "BTCUSDT", "mock": "BTCUSDT" },
+    "BINANCE:ETHUSDT": { "binance": "ETHUSDT", "mock": "ETHUSDT" },
+    "BINANCE:ADAUSDT": { "binance": "ADAUSDT", "mock": "ADAUSDT" },
+    "BINANCE:SOLUSDT": { "binance": "SOLUSDT", "mock": "SOLUSDT" },
+    "BINANCE:MATICUSDT": { "binance": "MATICUSDT", "mock": "MATICUSDT" },
+    "BINANCE:DOTUSDT": { "binance": "DOTUSDT", "mock": "DOTUSDT" },
+    "BINANCE:AVAXUSDT": { "binance": "AVAXUSDT", "mock": "AVAXUSDT" },
+    "BINANCE:LINKUSDT": { "binance": "LINKUSDT", "mock": "LINKUSDT" },
+    "BINANCE:UNIUSDT": { "binance": "UNIUSDT", "mock": "UNIUSDT" },
+    "BINANCE:LTCUSDT": { "binance": "LTCUSDT", "mock": "LTCUSDT" }
+  }
+}

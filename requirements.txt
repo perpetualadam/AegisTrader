@@ -33,8 +33,9 @@ scipy>=1.7.0
 # Logging and monitoring
 psutil>=5.8.0
 
+# Broker APIs
+python-binance>=1.0.19
 # Optional broker APIs (uncomment as needed)
-# python-binance>=1.0.15  # For Binance integration
 # ccxt>=2.0.0             # For multiple exchange support
 # alpaca-trade-api>=2.3.0 # For Alpaca integration
 # ib-insync>=0.9.70       # For Interactive Brokers

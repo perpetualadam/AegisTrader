@@ -5,11 +5,10 @@ Abstract interface for live trading integration with various brokers/exchanges.
 
 import time
 import logging
-from typing import Dict, List, Optional, Any
+from typing import Any, Dict, List, Optional
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from enum import Enum
-import json
 
 logger = logging.getLogger(__name__)
 
@@ -66,20 +65,27 @@ class BrokerAPI(ABC):
         pass
     
     @abstractmethod
-    def place_order(self, symbol: str, side: str, quantity: float, 
-                   order_type: str = "market", price: Optional[float] = None,
-                   stop_price: Optional[float] = None) -> OrderResult:
-        """Place a trading order."""
+    def place_order(
+        self,
+        symbol: str,
+        side: str,
+        quantity: float,
+        order_type: str = "market",
+        price: Optional[float] = None,
+        stop_price: Optional[float] = None,
+        client_order_id: Optional[str] = None,
+    ) -> OrderResult:
+        """Place a trading order. client_order_id enables venue idempotency / OMS correlation."""
         pass
     
     @abstractmethod
-    def cancel_order(self, order_id: str) -> bool:
-        """Cancel an existing order."""
+    def cancel_order(self, order_id: str, symbol: Optional[str] = None) -> bool:
+        """Cancel an existing order. Some venues require ``symbol`` (e.g. Binance spot)."""
         pass
-    
+
     @abstractmethod
-    def get_order_status(self, order_id: str) -> Dict[str, Any]:
-        """Get the status of an order."""
+    def get_order_status(self, order_id: str, symbol: Optional[str] = None) -> Dict[str, Any]:
+        """Order lookup; pass ``symbol`` when the venue requires it."""
         pass
     
     @abstractmethod
@@ -106,6 +112,8 @@ class MockBrokerAPI(BrokerAPI):
         self.positions = {}
         self.balance = 10000.0
         self.order_counter = 0
+        # Idempotent replay for same client_order_id (institutional OMS pattern)
+        self._idempotent: Dict[str, OrderResult] = {}
         
     def connect(self) -> bool:
         """Connect to the mock broker."""
@@ -118,9 +126,16 @@ class MockBrokerAPI(BrokerAPI):
         logger.info("Disconnected from Mock Broker API")
         self.is_connected = False
     
-    def place_order(self, symbol: str, side: str, quantity: float, 
-                   order_type: str = "market", price: Optional[float] = None,
-                   stop_price: Optional[float] = None) -> OrderResult:
+    def place_order(
+        self,
+        symbol: str,
+        side: str,
+        quantity: float,
+        order_type: str = "market",
+        price: Optional[float] = None,
+        stop_price: Optional[float] = None,
+        client_order_id: Optional[str] = None,
+    ) -> OrderResult:
         """Place a mock trading order."""
         if not self.is_connected:
             return OrderResult(
@@ -128,6 +143,9 @@ class MockBrokerAPI(BrokerAPI):
                 error_message="Not connected to broker",
                 timestamp=time.time()
             )
+
+        if client_order_id and client_order_id in self._idempotent:
+            return self._idempotent[client_order_id]
         
         # Generate order ID
         self.order_counter += 1
@@ -169,7 +187,7 @@ class MockBrokerAPI(BrokerAPI):
                     'timestamp': time.time()
                 }
                 
-                return OrderResult(
+                result = OrderResult(
                     success=True,
                     order_id=order_id,
                     status='filled',
@@ -178,6 +196,9 @@ class MockBrokerAPI(BrokerAPI):
                     fees=fees,
                     timestamp=time.time()
                 )
+                if client_order_id:
+                    self._idempotent[client_order_id] = result
+                return result
             else:
                 return OrderResult(
                     success=False,
@@ -199,22 +220,25 @@ class MockBrokerAPI(BrokerAPI):
                 'timestamp': time.time()
             }
             
-            return OrderResult(
+            result = OrderResult(
                 success=True,
                 order_id=order_id,
                 status='pending',
                 timestamp=time.time()
             )
+            if client_order_id:
+                self._idempotent[client_order_id] = result
+            return result
     
-    def cancel_order(self, order_id: str) -> bool:
+    def cancel_order(self, order_id: str, symbol: Optional[str] = None) -> bool:
         """Cancel a mock order."""
         if order_id in self.orders:
-            self.orders[order_id]['status'] = 'cancelled'
+            self.orders[order_id]["status"] = "cancelled"
             logger.info(f"Cancelled mock order {order_id}")
             return True
         return False
-    
-    def get_order_status(self, order_id: str) -> Dict[str, Any]:
+
+    def get_order_status(self, order_id: str, symbol: Optional[str] = None) -> Dict[str, Any]:
         """Get mock order status."""
         return self.orders.get(order_id, {})
     
@@ -236,67 +260,6 @@ class MockBrokerAPI(BrokerAPI):
         """Get mock balance."""
         return self.balance
 
-class BinanceBrokerAPI(BrokerAPI):
-    """Binance broker API implementation (placeholder)."""
-    
-    def __init__(self, api_key: str, api_secret: str, sandbox: bool = True):
-        super().__init__(api_key, api_secret, sandbox)
-        self.client = None
-        
-        # Note: This is a placeholder implementation
-        # In a real implementation, you would use the Binance Python API
-        logger.warning("BinanceBrokerAPI is a placeholder implementation")
-    
-    def connect(self) -> bool:
-        """Connect to Binance API."""
-        try:
-            # Placeholder - would initialize Binance client here
-            # from binance.client import Client
-            # self.client = Client(self.api_key, self.api_secret, testnet=self.sandbox)
-            
-            logger.info("Connected to Binance API (placeholder)")
-            self.is_connected = True
-            return True
-        except Exception as e:
-            logger.error(f"Failed to connect to Binance: {e}")
-            return False
-    
-    def disconnect(self):
-        """Disconnect from Binance API."""
-        self.is_connected = False
-        logger.info("Disconnected from Binance API")
-    
-    def place_order(self, symbol: str, side: str, quantity: float, 
-                   order_type: str = "market", price: Optional[float] = None,
-                   stop_price: Optional[float] = None) -> OrderResult:
-        """Place order on Binance (placeholder)."""
-        # Placeholder implementation
-        return OrderResult(
-            success=False,
-            error_message="Binance API not implemented",
-            timestamp=time.time()
-        )
-    
-    def cancel_order(self, order_id: str) -> bool:
-        """Cancel Binance order (placeholder)."""
-        return False
-    
-    def get_order_status(self, order_id: str) -> Dict[str, Any]:
-        """Get Binance order status (placeholder)."""
-        return {}
-    
-    def get_account_info(self) -> AccountInfo:
-        """Get Binance account info (placeholder)."""
-        return AccountInfo(balance=0.0, available_balance=0.0)
-    
-    def get_positions(self) -> List[Dict[str, Any]]:
-        """Get Binance positions (placeholder)."""
-        return []
-    
-    def get_balance(self) -> float:
-        """Get Binance balance (placeholder)."""
-        return 0.0
-
 def create_broker_api(broker_name: str, api_key: str, api_secret: str, 
                      sandbox: bool = True) -> BrokerAPI:
     """
@@ -315,8 +278,10 @@ def create_broker_api(broker_name: str, api_key: str, api_secret: str,
     
     if broker_name == 'mock':
         return MockBrokerAPI(api_key, api_secret, sandbox)
-    elif broker_name == 'binance':
-        return BinanceBrokerAPI(api_key, api_secret, sandbox)
+    elif broker_name == "binance":
+        from broker.binance_spot import BinanceSpotBroker
+
+        return BinanceSpotBroker(api_key, api_secret, sandbox)
     else:
         logger.warning(f"Unknown broker '{broker_name}', using mock broker")
         return MockBrokerAPI(api_key, api_secret, sandbox)

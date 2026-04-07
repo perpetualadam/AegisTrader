@@ -63,7 +63,7 @@ class TestMarketSessions:
     def test_market_session_creation(self):
         """Test market session creation."""
         session = MarketSession()
-        assert session.timezone.zone == 'Europe/London'
+        assert session.uk_tz.zone == 'Europe/London'
     
     def test_active_markets(self):
         """Test active markets detection."""
@@ -92,7 +92,7 @@ class TestStrategy:
         """Test strategy engine creation."""
         engine = StrategyEngine()
         assert engine is not None
-        assert len(engine.enabled_strategies) > 0
+        assert len(engine.config.enabled_strategies) > 0
     
     def test_signal_types(self):
         """Test signal type enum."""

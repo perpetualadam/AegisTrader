@@ -23,10 +23,22 @@ LIVE_TRADING = os.getenv("LIVE_TRADING", "False").lower() in ("true", "1", "yes"
 PAPER_TRADING = not LIVE_TRADING
 
 # Broker API Credentials
+BROKER_NAME = os.getenv("BROKER_NAME", "mock").strip().lower()
 BROKER_API_KEY = os.getenv("BROKER_API_KEY")
 BROKER_API_SECRET = os.getenv("BROKER_API_SECRET")
 BROKER_API_PASSPHRASE = os.getenv("BROKER_API_PASSPHRASE")  # For some exchanges
 BROKER_SANDBOX = os.getenv("BROKER_SANDBOX", "True").lower() in ("true", "1", "yes")
+
+# Institutional controls (prop desk style)
+KILL_SWITCH = os.getenv("KILL_SWITCH", "false").lower() in ("true", "1", "yes")
+MAX_ORDERS_PER_MINUTE = int(os.getenv("MAX_ORDERS_PER_MINUTE", "30"))
+BROKER_MAX_RETRIES = int(os.getenv("BROKER_MAX_RETRIES", "3"))
+BROKER_RETRY_BACKOFF_BASE_SEC = float(os.getenv("BROKER_RETRY_BACKOFF_BASE_SEC", "0.5"))
+CIRCUIT_BREAKER_FAILURE_THRESHOLD = int(os.getenv("CIRCUIT_BREAKER_FAILURE_THRESHOLD", "5"))
+CIRCUIT_BREAKER_WINDOW_SEC = int(os.getenv("CIRCUIT_BREAKER_WINDOW_SEC", "60"))
+AUDIT_LOG_ENABLED = os.getenv("AUDIT_LOG_ENABLED", "true").lower() in ("true", "1", "yes")
+AUDIT_LOG_PATH = os.getenv("AUDIT_LOG_PATH", "")  # set after LOGS_DIR
+RECONCILE_EVERY_N_LOOPS = int(os.getenv("RECONCILE_EVERY_N_LOOPS", "0"))  # 0 = off
 
 # TradingView Configuration
 TRADINGVIEW_USERNAME = os.getenv("TRADINGVIEW_USERNAME")
@@ -71,6 +83,17 @@ LOGS_DIR = Path(os.getenv("LOGS_DIR", "logs"))
 for directory in [DATA_DIR, MODELS_DIR, LOGS_DIR]:
     directory.mkdir(exist_ok=True)
 
+if not AUDIT_LOG_PATH:
+    AUDIT_LOG_PATH = str(LOGS_DIR / "audit.jsonl")
+
+# OMS persistence (SQLite)
+OMS_USE_SQLITE = os.getenv("OMS_USE_SQLITE", "true").lower() in ("true", "1", "yes")
+OMS_DB_PATH = os.getenv("OMS_DB_PATH", str(DATA_DIR / "oms.db"))
+
+# TradingView → venue symbol map (JSON)
+_default_symbol_map = Path(__file__).resolve().parent / "broker" / "symbol_map.default.json"
+SYMBOL_MAP_PATH = os.getenv("SYMBOL_MAP_PATH", str(_default_symbol_map))
+
 # Validation
 def validate_config() -> bool:
     """Validate configuration settings."""
@@ -87,6 +110,12 @@ def validate_config() -> bool:
     
     if not (0 < MAX_DAILY_LOSS <= 1):
         errors.append("MAX_DAILY_LOSS must be between 0 and 1")
+
+    if MAX_ORDERS_PER_MINUTE < 1:
+        errors.append("MAX_ORDERS_PER_MINUTE must be >= 1")
+
+    if CIRCUIT_BREAKER_FAILURE_THRESHOLD < 1:
+        errors.append("CIRCUIT_BREAKER_FAILURE_THRESHOLD must be >= 1")
     
     if errors:
         for error in errors:
@@ -100,7 +129,14 @@ def get_config_summary() -> dict:
     """Get a summary of current configuration (excluding sensitive data)."""
     return {
         "trading_mode": "LIVE" if LIVE_TRADING else "PAPER",
+        "broker_name": BROKER_NAME,
         "broker_sandbox": BROKER_SANDBOX,
+        "kill_switch": KILL_SWITCH,
+        "max_orders_per_minute": MAX_ORDERS_PER_MINUTE,
+        "circuit_breaker_threshold": CIRCUIT_BREAKER_FAILURE_THRESHOLD,
+        "audit_log_enabled": AUDIT_LOG_ENABLED,
+        "oms_sqlite": OMS_USE_SQLITE,
+        "oms_db": OMS_DB_PATH if OMS_USE_SQLITE else None,
         "browser_type": BROWSER_TYPE,
         "headless_browser": HEADLESS_BROWSER,
         "markets": DEFAULT_MARKETS,

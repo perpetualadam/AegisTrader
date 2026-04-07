@@ -7,13 +7,17 @@ import sys
 import time
 import signal
 import logging
-from typing import List
 from pathlib import Path
 
 # Import configuration and validation
 from config import (
-    validate_config, show_live_trading_warning, get_config_summary,
-    LIVE_TRADING, DEFAULT_MARKETS, SCAN_INTERVAL
+    validate_config,
+    show_live_trading_warning,
+    get_config_summary,
+    LIVE_TRADING,
+    DEFAULT_MARKETS,
+    SCAN_INTERVAL,
+    RECONCILE_EVERY_N_LOOPS,
 )
 
 # Import core modules
@@ -25,6 +29,9 @@ from execution.execution import Execution, get_execution_engine
 from risk.risk_manager import RiskManager, get_risk_manager
 from utils.logger import get_logger
 from utils.tts_feedback import get_tts_feedback
+from institutional.controls import get_institutional_controls
+from oms.reconciliation import reconcile_with_broker
+from oms.order_registry import get_order_registry
 
 # Global instances
 logger = None
@@ -88,6 +95,10 @@ def display_startup_info():
     print(f"Max Daily Loss: {config['max_daily_loss']*100:.1f}%")
     print(f"TTS Enabled: {config['tts_enabled']}")
     print(f"Scan Interval: {config['scan_interval']}s")
+    print(f"Broker: {config.get('broker_name', 'mock')}")
+    print(f"Kill switch: {'ON (no new orders)' if config.get('kill_switch') else 'off'}")
+    print(f"Order rate cap: {config.get('max_orders_per_minute', 30)}/min")
+    print(f"Audit log: {'on' if config.get('audit_log_enabled') else 'off'}")
     print("="*60)
 
 def display_market_status():
@@ -111,83 +122,142 @@ def display_market_status():
 def run_trading_loop():
     """Main trading loop."""
     global running
-    
+
+    controls = get_institutional_controls()
+    controls.audit.append(
+        "session_start",
+        {
+            "live_trading": LIVE_TRADING,
+            "kill_switch": controls.kill_switch,
+            "markets": list(DEFAULT_MARKETS),
+        },
+    )
+    if controls.kill_switch:
+        logger.warning(
+            "KILL_SWITCH is enabled — automated order submission is disabled (scanning may continue)."
+        )
+
     logger.info("Starting main trading loop")
     tts_feedback.announce_system_status("Trading loop started")
-    
+
     # Get tradeable assets for active markets
     active_market_types = [MarketType(market) for market in DEFAULT_MARKETS]
     assets = get_tradeable_assets(active_market_types)
-    
+
     if not assets:
         logger.error("No tradeable assets found")
         return
-    
+
     logger.info(f"Monitoring {len(assets)} assets across {len(active_market_types)} markets")
-    
+
     # Start continuous scanning
     scanner.start_continuous_scanning(assets, SCAN_INTERVAL)
-    
+
+    loop_i = 0
     try:
         while running:
+            loop_i += 1
+            if (
+                RECONCILE_EVERY_N_LOOPS > 0
+                and LIVE_TRADING
+                and loop_i % RECONCILE_EVERY_N_LOOPS == 0
+            ):
+                brk = execution_engine.get_broker()
+                if brk:
+                    disc = reconcile_with_broker(brk, get_order_registry())
+                    if disc:
+                        controls.audit.append(
+                            "reconciliation_discrepancy",
+                            {"count": len(disc), "sample": disc[:3]},
+                        )
+
             # Get latest opportunities
             opportunities = scanner.find_best_opportunities()
-            
+
             if opportunities:
                 logger.info(f"Found {len(opportunities)} trading opportunities")
-                
+
                 # Process each opportunity
                 for opportunity in opportunities:
                     if not running:
                         break
-                    
+
+                    if controls.kill_switch:
+                        logger.debug("Kill switch active — skipping order flow")
+                        break
+
+                    if controls.circuit_breaker.is_open():
+                        logger.error(
+                            "Circuit breaker open — too many recent failures; skipping new orders this cycle"
+                        )
+                        break
+
                     # Get scan result for detailed analysis
                     scan_result = scanner.scan_results.get(opportunity.asset.symbol)
                     if not scan_result:
                         continue
-                    
+
                     # Generate trading signal
                     signal = strategy_engine.analyze_opportunity(opportunity, scan_result)
-                    
+
                     if signal:
                         # Validate with risk manager
                         portfolio_summary = execution_engine.get_portfolio_summary()
                         positions = execution_engine.get_positions()
-                        
+
                         validation = risk_manager.validate_signal(
-                            signal, 
-                            portfolio_summary['current_balance'],
-                            {pos['symbol']: pos for pos in positions}
+                            signal,
+                            portfolio_summary["current_balance"],
+                            {pos["symbol"]: pos for pos in positions},
                         )
-                        
-                        if validation['approved']:
-                            # Execute trade
-                            order_id = execution_engine.place_order(signal, validation['position_size'])
-                            
+
+                        if validation["approved"]:
+                            if not controls.rate_limiter.acquire():
+                                logger.warning(
+                                    "Order rate limit reached — skipping until next minute window"
+                                )
+                                controls.audit.append(
+                                    "order_blocked",
+                                    {"reason": "rate_limit", "symbol": signal.asset.symbol},
+                                )
+                                continue
+
+                            order_id = execution_engine.place_order(
+                                signal, validation["position_size"]
+                            )
+
                             if order_id:
-                                logger.info(f"Trade executed: {signal.signal_type.value} {signal.asset.symbol}")
+                                logger.info(
+                                    f"Trade executed: {signal.signal_type.value} {signal.asset.symbol}"
+                                )
                                 tts_feedback.announce_trade(
                                     signal.asset.symbol,
                                     signal.signal_type.value,
-                                    validation['position_size'],
-                                    signal.entry_price
+                                    validation["position_size"],
+                                    signal.entry_price,
                                 )
                             else:
-                                logger.warning(f"Failed to execute trade for {signal.asset.symbol}")
+                                logger.warning(
+                                    f"Failed to execute trade for {signal.asset.symbol}"
+                                )
                         else:
-                            logger.info(f"Signal rejected by risk manager: {validation['warnings']}")
-            
+                            logger.info(
+                                f"Signal rejected by risk manager: {validation['warnings']}"
+                            )
+
             # Update risk metrics
             portfolio_summary = execution_engine.get_portfolio_summary()
-            risk_manager.update_daily_pnl(portfolio_summary['current_balance'])
-            
+            risk_manager.update_daily_pnl(portfolio_summary["current_balance"])
+
             # Sleep before next iteration
             time.sleep(10)  # Check every 10 seconds
-            
+
     except KeyboardInterrupt:
         logger.info("Keyboard interrupt received")
     except Exception as e:
         logger.error(f"Error in trading loop: {e}")
+        controls.circuit_breaker.record_failure()
+        controls.audit.append("trading_loop_error", {"error": str(e)})
     finally:
         # Stop continuous scanning
         scanner.stop_continuous_scanning()

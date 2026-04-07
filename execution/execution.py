@@ -5,6 +5,7 @@ Handles both simulated (paper) and live trading execution.
 
 import time
 import logging
+import uuid
 from typing import List, Dict, Optional, Any
 from dataclasses import dataclass, field
 from enum import Enum
@@ -12,7 +13,16 @@ import json
 from datetime import datetime
 from pathlib import Path
 
-from config import LIVE_TRADING, BROKER_API_KEY, BROKER_API_SECRET
+from config import (
+    LIVE_TRADING,
+    BROKER_API_KEY,
+    BROKER_API_SECRET,
+    BROKER_NAME,
+    BROKER_SANDBOX,
+    BROKER_MAX_RETRIES,
+    BROKER_RETRY_BACKOFF_BASE_SEC,
+)
+from broker.symbol_resolver import resolve_venue_symbol
 from assets import Asset
 from strategy.strategy_engine import TradingSignal, SignalType
 
@@ -55,6 +65,8 @@ class Order:
     fill_timestamp: Optional[float] = None
     fees: float = 0.0
     signal_id: Optional[str] = None
+    client_order_id: str = ""
+    exchange_order_id: Optional[str] = None
 
 @dataclass
 class Position:
@@ -121,15 +133,32 @@ class Execution:
     def _initialize_live_trading(self):
         """Initialize live trading broker connection."""
         try:
-            from broker.broker_api import BrokerAPI
-            self.broker = BrokerAPI(
-                api_key=BROKER_API_KEY,
-                api_secret=BROKER_API_SECRET
+            from broker.broker_api import create_broker_api
+            from institutional.resilient_broker import ResilientBrokerAdapter
+            from institutional.audit_log import get_audit_log
+
+            base = create_broker_api(
+                BROKER_NAME,
+                BROKER_API_KEY or "",
+                BROKER_API_SECRET or "",
+                BROKER_SANDBOX,
             )
-            logger.info("Live trading broker initialized")
+            if not base.connect():
+                raise RuntimeError("Broker connect() returned False")
+            self.broker = ResilientBrokerAdapter(
+                base,
+                max_retries=BROKER_MAX_RETRIES,
+                backoff_base_sec=BROKER_RETRY_BACKOFF_BASE_SEC,
+                audit=get_audit_log(),
+            )
+            logger.info("Live trading broker initialized (%s)", BROKER_NAME)
         except Exception as e:
             logger.error(f"Failed to initialize live trading: {e}")
             raise
+
+    def get_broker(self):
+        """Return broker adapter when live trading; None in paper mode."""
+        return self.broker if LIVE_TRADING else None
     
     def place_order(self, signal: TradingSignal, quantity: Optional[float] = None) -> Optional[str]:
         """
@@ -155,8 +184,9 @@ class Execution:
             if not self._validate_order(signal, quantity):
                 return None
             
-            # Create order
+            # Create order (client_order_id for venue idempotency / OMS)
             order_id = self._generate_order_id()
+            client_order_id = str(uuid.uuid4())
             order = Order(
                 id=order_id,
                 asset=signal.asset,
@@ -164,25 +194,84 @@ class Execution:
                 order_type=OrderType.MARKET,  # Default to market orders
                 quantity=quantity,
                 price=signal.entry_price,
-                signal_id=str(signal.timestamp)
+                signal_id=str(signal.timestamp),
+                client_order_id=client_order_id,
             )
-            
+
+            try:
+                from oms.order_registry import OrderRecord, LocalOrderState, get_order_registry
+                from institutional.controls import get_institutional_controls
+
+                venue_symbol = resolve_venue_symbol(signal.asset.tradingview_ticker, BROKER_NAME)
+                get_order_registry().register_intent(
+                    OrderRecord(
+                        client_order_id=client_order_id,
+                        symbol=signal.asset.symbol,
+                        side=order.side,
+                        quantity=quantity,
+                        state=LocalOrderState.PENDING_SUBMIT,
+                        tradingview_ticker=signal.asset.tradingview_ticker,
+                        venue=BROKER_NAME,
+                        venue_symbol=venue_symbol,
+                    ),
+                    internal_order_id=order_id,
+                )
+                get_institutional_controls().audit.append(
+                    "order_intent",
+                    {
+                        "internal_order_id": order_id,
+                        "client_order_id": client_order_id,
+                        "symbol": signal.asset.symbol,
+                        "side": order.side,
+                        "quantity": quantity,
+                    },
+                )
+            except Exception as e:
+                logger.warning("OMS/audit registration failed (non-fatal): %s", e)
+
             # Execute order
             if LIVE_TRADING and self.broker:
                 success = self._execute_live_order(order)
             else:
                 success = self._execute_simulated_order(order)
-            
+
             if success:
                 self.orders[order_id] = order
                 logger.info(f"Placed {order.side} order for {order.quantity} {order.asset.symbol}")
+                if not LIVE_TRADING:
+                    try:
+                        from oms.order_registry import LocalOrderState, get_order_registry
+
+                        r = get_order_registry()
+                        r.mark_submitted(order.client_order_id, "paper")
+                        r.mark_terminal(order.client_order_id, LocalOrderState.FILLED)
+                    except Exception:
+                        pass
+                try:
+                    from institutional.controls import get_institutional_controls
+
+                    get_institutional_controls().circuit_breaker.record_success()
+                except Exception:
+                    pass
                 return order_id
             else:
                 logger.error(f"Failed to execute order for {signal.asset.symbol}")
+                try:
+                    from institutional.controls import get_institutional_controls
+
+                    get_institutional_controls().circuit_breaker.record_failure()
+                except Exception:
+                    pass
                 return None
-                
+
         except Exception as e:
             logger.error(f"Error placing order: {e}")
+            try:
+                from institutional.controls import get_institutional_controls
+
+                get_institutional_controls().circuit_breaker.record_failure()
+            except Exception:
+                pass
             return None
     
     def _calculate_position_size(self, signal: TradingSignal) -> float:
@@ -238,29 +327,45 @@ class Execution:
     def _execute_live_order(self, order: Order) -> bool:
         """Execute order through live broker."""
         try:
+            from oms.order_registry import LocalOrderState, get_order_registry
+
+            venue_symbol = resolve_venue_symbol(order.asset.tradingview_ticker, BROKER_NAME)
             result = self.broker.place_order(
-                symbol=order.asset.tradingview_ticker,
+                symbol=venue_symbol,
                 side=order.side,
                 quantity=order.quantity,
                 order_type=order.order_type.value,
-                price=order.price
+                price=order.price,
+                client_order_id=order.client_order_id or None,
             )
-            
-            if result and result.get('status') == 'success':
+
+            if result and result.success:
                 order.status = OrderStatus.FILLED
-                order.filled_quantity = order.quantity
-                order.filled_price = result.get('fill_price', order.price)
+                order.filled_quantity = result.filled_quantity or order.quantity
+                order.filled_price = result.fill_price if result.fill_price is not None else order.price
                 order.fill_timestamp = time.time()
-                order.fees = result.get('fees', 0.0)
-                
+                order.fees = result.fees or 0.0
+                order.exchange_order_id = result.order_id
+
+                reg = get_order_registry()
+                reg.mark_submitted(order.client_order_id, result.order_id)
+                reg.mark_terminal(order.client_order_id, LocalOrderState.FILLED)
+
                 self._update_position(order)
-                logger.info(f"Live order executed: {order.id}")
+                logger.info(f"Live order executed: {order.id} exchange_id={result.order_id}")
                 return True
             else:
                 order.status = OrderStatus.REJECTED
-                logger.error(f"Live order rejected: {result}")
+                err = result.error_message if result else "unknown"
+                logger.error("Live order rejected: %s", err)
+                try:
+                    get_order_registry().mark_terminal(
+                        order.client_order_id, LocalOrderState.REJECTED
+                    )
+                except Exception:
+                    pass
                 return False
-                
+
         except Exception as e:
             logger.error(f"Error executing live order: {e}")
             order.status = OrderStatus.REJECTED
@@ -412,7 +517,8 @@ class Execution:
             side=side,
             order_type=OrderType.MARKET,
             quantity=position.quantity,
-            price=position.current_price
+            price=position.current_price,
+            client_order_id=str(uuid.uuid4()),
         )
 
         # Execute closing order
