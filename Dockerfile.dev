@@ -1,0 +1,88 @@
+# AegisTrader Development Dockerfile
+# Optimized for development with debugging tools
+FROM python:3.11-slim
+
+# Install system dependencies including development tools
+RUN apt-get update && apt-get install -y \
+    tesseract-ocr \
+    tesseract-ocr-eng \
+    wget \
+    gnupg \
+    unzip \
+    curl \
+    xvfb \
+    git \
+    vim \
+    htop \
+    build-essential \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install Chrome
+RUN wget -q -O - https://dl-ssl.google.com/linux/linux_signing_key.pub | apt-key add - && \
+    echo "deb [arch=amd64] http://dl.google.com/linux/chrome/deb/ stable main" >> /etc/apt/sources.list.d/google.list && \
+    apt-get update && \
+    apt-get install -y google-chrome-stable && \
+    rm -rf /var/lib/apt/lists/*
+
+# Set working directory
+WORKDIR /app
+
+# Copy requirements and install Python dependencies
+COPY requirements.txt .
+RUN pip install --no-cache-dir --upgrade pip && \
+    pip install --no-cache-dir -r requirements.txt
+
+# Install development dependencies
+RUN pip install --no-cache-dir \
+    pytest \
+    pytest-cov \
+    black \
+    flake8 \
+    ipython \
+    jupyter \
+    debugpy \
+    python-dotenv
+
+# Create directories
+RUN mkdir -p data logs models screenshots dev-data dev-logs dev-screenshots
+
+# Set environment variables for development
+ENV PYTHONPATH=/app \
+    PYTHONUNBUFFERED=1 \
+    DISPLAY=:99 \
+    DEBUG_MODE=true
+
+# Create development startup script
+RUN echo '#!/bin/bash\n\
+echo "=== AegisTrader Development Environment ==="\n\
+echo ""\n\
+echo "Available commands:"\n\
+echo "  python main.py                    - Run AegisTrader"\n\
+echo "  python -m pytest tests/          - Run tests"\n\
+echo "  python -m pytest tests/ -v       - Run tests (verbose)"\n\
+echo "  python -m pytest tests/ --cov    - Run tests with coverage"\n\
+echo "  black .                          - Format code"\n\
+echo "  flake8 .                         - Lint code"\n\
+echo "  python -c \"from config import validate_config; print(validate_config())\" - Test config"\n\
+echo ""\n\
+echo "Component tests:"\n\
+echo "  python -m vision.yolo_detector   - Test YOLO detector"\n\
+echo "  python -m vision.ocr_reader      - Test OCR reader"\n\
+echo "  python -m browser.selenium_controller - Test browser automation"\n\
+echo "  python -m scanner.market_scanner - Test market scanner"\n\
+echo ""\n\
+echo "Development tools:"\n\
+echo "  ipython                          - Interactive Python shell"\n\
+echo "  jupyter lab --ip=0.0.0.0 --allow-root - Start Jupyter Lab"\n\
+echo ""\n\
+echo "Starting virtual display for browser testing..."\n\
+Xvfb :99 -screen 0 1920x1080x24 &\n\
+sleep 2\n\
+echo "Virtual display started on :99"\n\
+echo ""\n\
+exec /bin/bash\n\
+' > /app/dev-start.sh && \
+    chmod +x /app/dev-start.sh
+
+# Default command for development
+CMD ["/app/dev-start.sh"]

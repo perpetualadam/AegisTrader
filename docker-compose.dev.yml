@@ -1,0 +1,107 @@
+# AegisTrader Development Docker Compose
+# For development with hot reload and debugging
+version: '3.8'
+
+services:
+  # Development AegisTrader with volume mounts for live editing
+  aegistrader-dev:
+    build:
+      context: .
+      dockerfile: Dockerfile.dev
+    container_name: aegistrader-dev
+    restart: "no"
+    environment:
+      - LIVE_TRADING=false
+      - HEADLESS_BROWSER=false  # Visible browser for debugging
+      - LOG_LEVEL=DEBUG
+      - DEBUG_MODE=true
+      - SAVE_DEBUG_SCREENSHOTS=true
+      - TTS_ENABLED=false
+    
+    volumes:
+      # Live code editing
+      - .:/app
+      - /app/venv  # Exclude virtual environment
+      
+      # Persistent development data
+      - ./dev-data:/app/data
+      - ./dev-logs:/app/logs
+      - ./dev-screenshots:/app/screenshots
+    
+    networks:
+      - aegistrader-dev-network
+    
+    # Expose ports for debugging
+    ports:
+      - "5678:5678"  # Python debugger
+      - "8080:8080"  # Development server
+    
+    # Keep container running for development
+    tty: true
+    stdin_open: true
+    
+    # Override command for development
+    command: >
+      bash -c "
+        echo 'Starting AegisTrader in development mode...'
+        echo 'Available commands:'
+        echo '  python main.py          - Run main application'
+        echo '  python -m pytest tests/ - Run tests'
+        echo '  python -m vision.yolo_detector - Test YOLO'
+        echo '  python -m vision.ocr_reader    - Test OCR'
+        echo ''
+        echo 'Entering interactive shell...'
+        /bin/bash
+      "
+
+  # Development database with exposed ports
+  postgres-dev:
+    image: postgres:15-alpine
+    container_name: aegistrader-db-dev
+    restart: unless-stopped
+    environment:
+      - POSTGRES_DB=aegistrader_dev
+      - POSTGRES_USER=dev_user
+      - POSTGRES_PASSWORD=dev_password
+    volumes:
+      - postgres_dev_data:/var/lib/postgresql/data
+    networks:
+      - aegistrader-dev-network
+    ports:
+      - "5433:5432"  # Different port to avoid conflicts
+
+  # Development Redis
+  redis-dev:
+    image: redis:7-alpine
+    container_name: aegistrader-redis-dev
+    restart: unless-stopped
+    networks:
+      - aegistrader-dev-network
+    ports:
+      - "6380:6379"  # Different port to avoid conflicts
+
+  # Jupyter notebook for data analysis
+  jupyter:
+    image: jupyter/scipy-notebook:latest
+    container_name: aegistrader-jupyter
+    restart: unless-stopped
+    environment:
+      - JUPYTER_ENABLE_LAB=yes
+    volumes:
+      - .:/home/jovyan/work
+      - ./notebooks:/home/jovyan/notebooks
+    networks:
+      - aegistrader-dev-network
+    ports:
+      - "8888:8888"
+    command: start-notebook.sh --NotebookApp.token='' --NotebookApp.password=''
+
+# Development networks
+networks:
+  aegistrader-dev-network:
+    driver: bridge
+
+# Development volumes
+volumes:
+  postgres_dev_data:
+    driver: local

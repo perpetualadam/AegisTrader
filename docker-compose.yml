@@ -1,0 +1,162 @@
+# AegisTrader Docker Compose Configuration
+version: '3.8'
+
+services:
+  # Main AegisTrader application
+  aegistrader:
+    build: .
+    container_name: aegistrader
+    restart: unless-stopped
+    environment:
+      # Trading configuration
+      - LIVE_TRADING=false
+      - HEADLESS_BROWSER=true
+      - LOG_LEVEL=INFO
+      - TTS_ENABLED=false
+      
+      # Performance settings
+      - SCAN_INTERVAL=300
+      - MAX_BROWSER_INSTANCES=2
+      - SCREENSHOT_QUALITY=75
+      
+      # Security
+      - BROKER_SANDBOX=true
+    
+    volumes:
+      # Persistent data
+      - ./data:/app/data
+      - ./logs:/app/logs
+      - ./models:/app/models
+      - ./screenshots:/app/screenshots
+      
+      # Configuration
+      - ./.env:/app/.env:ro
+      
+      # Optional: Custom strategies
+      - ./strategy/custom_strategies.py:/app/strategy/custom_strategies.py:ro
+    
+    networks:
+      - aegistrader-network
+    
+    # Resource limits
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+          cpus: '1.0'
+        reservations:
+          memory: 1G
+          cpus: '0.5'
+    
+    # Health check
+    healthcheck:
+      test: ["CMD", "python", "-c", "from config import validate_config; exit(0 if validate_config() else 1)"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+
+  # Optional: PostgreSQL database for trade history
+  postgres:
+    image: postgres:15-alpine
+    container_name: aegistrader-db
+    restart: unless-stopped
+    environment:
+      - POSTGRES_DB=aegistrader
+      - POSTGRES_USER=aegistrader
+      - POSTGRES_PASSWORD=secure_password_change_me
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./sql/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    networks:
+      - aegistrader-network
+    ports:
+      - "5432:5432"
+
+  # Optional: Redis for caching and session management
+  redis:
+    image: redis:7-alpine
+    container_name: aegistrader-redis
+    restart: unless-stopped
+    command: redis-server --appendonly yes
+    volumes:
+      - redis_data:/data
+    networks:
+      - aegistrader-network
+    ports:
+      - "6379:6379"
+
+  # Optional: Prometheus for metrics collection
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: aegistrader-prometheus
+    restart: unless-stopped
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.console.libraries=/etc/prometheus/console_libraries'
+      - '--web.console.templates=/etc/prometheus/consoles'
+      - '--storage.tsdb.retention.time=200h'
+      - '--web.enable-lifecycle'
+    volumes:
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+    networks:
+      - aegistrader-network
+    ports:
+      - "9090:9090"
+
+  # Optional: Grafana for visualization
+  grafana:
+    image: grafana/grafana:latest
+    container_name: aegistrader-grafana
+    restart: unless-stopped
+    environment:
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=admin_change_me
+      - GF_USERS_ALLOW_SIGN_UP=false
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./monitoring/grafana/dashboards:/etc/grafana/provisioning/dashboards:ro
+      - ./monitoring/grafana/datasources:/etc/grafana/provisioning/datasources:ro
+    networks:
+      - aegistrader-network
+    ports:
+      - "3000:3000"
+    depends_on:
+      - prometheus
+
+  # Optional: Nginx reverse proxy
+  nginx:
+    image: nginx:alpine
+    container_name: aegistrader-nginx
+    restart: unless-stopped
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./nginx/ssl:/etc/nginx/ssl:ro
+    networks:
+      - aegistrader-network
+    ports:
+      - "80:80"
+      - "443:443"
+    depends_on:
+      - grafana
+
+# Networks
+networks:
+  aegistrader-network:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.0.0/16
+
+# Volumes
+volumes:
+  postgres_data:
+    driver: local
+  redis_data:
+    driver: local
+  prometheus_data:
+    driver: local
+  grafana_data:
+    driver: local
