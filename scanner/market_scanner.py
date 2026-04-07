@@ -48,12 +48,40 @@ def _merge_price_data(sem: Optional[PriceData], leg: Optional[PriceData]) -> Opt
         setattr(out, attr, sv if sv is not None else lv)
     return out
 
+
+def _merge_api_first(api: Optional[PriceData], ocr: Optional[PriceData]) -> Optional[PriceData]:
+    """Prefer exchange API OHLCV; OCR fills missing fields (e.g. change %)."""
+    if api is None and ocr is None:
+        return None
+    if ocr is None:
+        return api
+    if api is None:
+        return ocr
+    import time
+
+    out = PriceData(timestamp=time.time())
+    for attr in (
+        "current_price",
+        "high_price",
+        "low_price",
+        "open_price",
+        "close_price",
+        "volume",
+        "change_percent",
+        "change_value",
+    ):
+        av = getattr(api, attr, None)
+        ov = getattr(ocr, attr, None)
+        setattr(out, attr, av if av is not None else ov)
+    return out
+
 @dataclass
 class ScanResult:
     """Result of scanning a single asset."""
     asset: Asset
     timestamp: float
     price_data: Optional[PriceData] = None
+    chart_data_source: str = "vision"
     ui_semantic: Optional[UISemanticReading] = None
     pattern_analysis: Optional[Dict] = None
     technical_score: float = 0.0
@@ -155,8 +183,33 @@ class MarketScanner:
                 if 'error' in result.pattern_analysis:
                     result.errors.append(f"YOLO analysis failed: {result.pattern_analysis['error']}")
             
-            # Extract price data: semantic UI reading + legacy OCR merge
-            if self.ocr_reader and result.screenshot_path:
+            # Price data: optional fast Binance public klines (crypto) + OCR merge
+            try:
+                from config import CHART_DATA_SOURCE, CHART_DATA_SKIP_OCR_WHEN_API
+            except ImportError:
+                CHART_DATA_SOURCE = "vision"
+                CHART_DATA_SKIP_OCR_WHEN_API = False
+
+            api_pd = None
+            if CHART_DATA_SOURCE in ("binance", "hybrid") and asset.market_type == MarketType.CRYPTO:
+                try:
+                    from broker.symbol_resolver import resolve_venue_symbol
+                    from market_data.binance_public import fetch_binance_kline_as_price_data
+
+                    sym = resolve_venue_symbol(asset.tradingview_ticker, "binance")
+                    api_pd = fetch_binance_kline_as_price_data(sym, timeframe)
+                except Exception as e:
+                    logger.debug("Market data API skipped: %s", e)
+
+            skip_ocr = False
+            if api_pd:
+                if CHART_DATA_SOURCE == "binance":
+                    skip_ocr = True
+                elif CHART_DATA_SOURCE == "hybrid" and CHART_DATA_SKIP_OCR_WHEN_API:
+                    skip_ocr = True
+
+            ocr_merged = None
+            if self.ocr_reader and result.screenshot_path and not skip_ocr:
                 import cv2
 
                 image = cv2.imread(result.screenshot_path)
@@ -166,11 +219,31 @@ class MarketScanner:
                     if sem:
                         reading = sem.read_screen(image)
                         result.ui_semantic = reading
-                        result.price_data = _merge_price_data(reading.to_price_data(), legacy_pd)
+                        ocr_merged = _merge_price_data(reading.to_price_data(), legacy_pd)
                     else:
-                        result.price_data = legacy_pd
+                        ocr_merged = legacy_pd
                 else:
                     result.errors.append("Could not load screenshot for OCR")
+
+            if CHART_DATA_SOURCE == "vision":
+                result.price_data = ocr_merged
+                result.chart_data_source = "vision_ocr"
+            elif CHART_DATA_SOURCE == "binance":
+                result.price_data = api_pd or ocr_merged
+                result.chart_data_source = (
+                    "binance_public_api" if api_pd else "vision_ocr"
+                )
+            elif CHART_DATA_SOURCE == "hybrid":
+                result.price_data = _merge_api_first(api_pd, ocr_merged)
+                if api_pd and ocr_merged:
+                    result.chart_data_source = "hybrid_api+ocr"
+                elif api_pd:
+                    result.chart_data_source = "binance_public_api"
+                else:
+                    result.chart_data_source = "vision_ocr"
+            else:
+                result.price_data = ocr_merged
+                result.chart_data_source = "vision_ocr"
             
             # Calculate scores
             result.technical_score = self._calculate_technical_score(result)

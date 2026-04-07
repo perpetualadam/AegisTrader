@@ -58,6 +58,17 @@ OCR_SEMANTIC_ENABLED = os.getenv("OCR_SEMANTIC_ENABLED", "true").lower() in ("tr
 _default_ui_layout = Path(__file__).resolve().parent / "vision" / "tradingview_ui_layout.default.json"
 TRADINGVIEW_UI_LAYOUT_PATH = os.getenv("TRADINGVIEW_UI_LAYOUT_PATH", str(_default_ui_layout))
 
+# Chart data: vision = screenshot OCR only; binance = crypto OHLCV from Binance public API (fast);
+# hybrid = API for crypto when possible + OCR fills gaps (YOLO still uses screenshot)
+CHART_DATA_SOURCE = os.getenv("CHART_DATA_SOURCE", "hybrid").strip().lower()
+BINANCE_PUBLIC_BASE_URL = os.getenv(
+    "BINANCE_PUBLIC_BASE_URL", "https://api.binance.com"
+).rstrip("/")
+# When hybrid/binance API returns OHLCV, skip slow OCR on screenshot (YOLO still runs)
+CHART_DATA_SKIP_OCR_WHEN_API = os.getenv(
+    "CHART_DATA_SKIP_OCR_WHEN_API", "true"
+).lower() in ("true", "1", "yes")
+
 # Browser Configuration
 BROWSER_TYPE = os.getenv("BROWSER_TYPE", "chrome")  # chrome, firefox, edge
 HEADLESS_BROWSER = os.getenv("HEADLESS_BROWSER", "False").lower() in ("true", "1", "yes")
@@ -158,6 +169,8 @@ def get_config_summary() -> dict:
         "ocr_semantic_enabled": OCR_SEMANTIC_ENABLED,
         "ocr_preprocess_mode": OCR_PREPROCESS_MODE,
         "ocr_full_panel": OCR_FULL_PANEL,
+        "chart_data_source": CHART_DATA_SOURCE,
+        "binance_public_base_url": BINANCE_PUBLIC_BASE_URL,
     }
 
 # Startup warning for live trading
