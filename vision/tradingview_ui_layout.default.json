@@ -1,0 +1,22 @@
+{
+  "version": "1",
+  "reference_resolution": [1920, 1080],
+  "comment": "Normalized 0-1 coords. Tune per your TradingView layout (watchlist left, legend top-right, etc.).",
+  "regions": {
+    "full_panel": [0.0, 0.0, 1.0, 1.0],
+    "legend_top_right": [0.62, 0.02, 0.995, 0.22],
+    "toolbar_top": [0.0, 0.0, 1.0, 0.07],
+    "left_sidebar": [0.0, 0.07, 0.18, 0.95],
+    "chart_main": [0.18, 0.07, 0.995, 0.92],
+    "bottom_timeline": [0.0, 0.92, 1.0, 1.0],
+    "symbol_header": [0.18, 0.07, 0.62, 0.14]
+  },
+  "semantic_hints": {
+    "last_price": { "region": "legend_top_right", "anchors": ["last", "last price", "l:"] },
+    "bid": { "region": "legend_top_right", "anchors": ["bid", "b:"] },
+    "ask": { "region": "legend_top_right", "anchors": ["ask", "a:"] },
+    "ohlc": { "region": "symbol_header", "anchors": ["o ", "h ", "l ", "c ", "open", "high", "low", "close"] },
+    "change_percent": { "region": "symbol_header", "anchors": ["%", "chg"] },
+    "volume": { "region": "legend_top_right", "anchors": ["vol", "volume"] }
+  }
+}

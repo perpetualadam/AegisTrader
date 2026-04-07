@@ -18,9 +18,35 @@ from market_sessions import MarketSession, MarketType, get_active_markets
 from assets import Asset, AssetManager, get_tradeable_assets
 from vision.yolo_detector import YOLODetector, get_yolo_detector
 from vision.ocr_reader import OCRReader, get_ocr_reader, PriceData
+from vision.semantic_reader import UISemanticReading, get_semantic_reader
 from browser.selenium_controller import SeleniumController, get_selenium_controller
 
 logger = logging.getLogger(__name__)
+
+
+def _merge_price_data(sem: Optional[PriceData], leg: Optional[PriceData]) -> Optional[PriceData]:
+    """Prefer semantic fields; fill gaps from legacy full-image OCR."""
+    if sem is None and leg is None:
+        return None
+    if sem is None:
+        return leg
+    if leg is None:
+        return sem
+    out = PriceData(timestamp=max(sem.timestamp, leg.timestamp))
+    for attr in (
+        "current_price",
+        "high_price",
+        "low_price",
+        "open_price",
+        "close_price",
+        "volume",
+        "change_percent",
+        "change_value",
+    ):
+        sv = getattr(sem, attr, None)
+        lv = getattr(leg, attr, None)
+        setattr(out, attr, sv if sv is not None else lv)
+    return out
 
 @dataclass
 class ScanResult:
@@ -28,6 +54,7 @@ class ScanResult:
     asset: Asset
     timestamp: float
     price_data: Optional[PriceData] = None
+    ui_semantic: Optional[UISemanticReading] = None
     pattern_analysis: Optional[Dict] = None
     technical_score: float = 0.0
     fundamental_score: float = 0.0
@@ -128,12 +155,20 @@ class MarketScanner:
                 if 'error' in result.pattern_analysis:
                     result.errors.append(f"YOLO analysis failed: {result.pattern_analysis['error']}")
             
-            # Extract price data with OCR
+            # Extract price data: semantic UI reading + legacy OCR merge
             if self.ocr_reader and result.screenshot_path:
                 import cv2
+
                 image = cv2.imread(result.screenshot_path)
                 if image is not None:
-                    result.price_data = self.ocr_reader.extract_price_data(image)
+                    legacy_pd = self.ocr_reader.extract_price_data(image)
+                    sem = get_semantic_reader()
+                    if sem:
+                        reading = sem.read_screen(image)
+                        result.ui_semantic = reading
+                        result.price_data = _merge_price_data(reading.to_price_data(), legacy_pd)
+                    else:
+                        result.price_data = legacy_pd
                 else:
                     result.errors.append("Could not load screenshot for OCR")
             

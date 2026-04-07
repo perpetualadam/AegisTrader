@@ -48,6 +48,15 @@ TRADINGVIEW_PASSWORD = os.getenv("TRADINGVIEW_PASSWORD")
 YOLO_MODEL_PATH = os.getenv("YOLO_MODEL_PATH", "models/yolo_chart_patterns.pt")
 OCR_ENGINE = os.getenv("OCR_ENGINE", "tesseract")  # tesseract, easyocr, paddleocr
 SCREENSHOT_INTERVAL = float(os.getenv("SCREENSHOT_INTERVAL", "5.0"))  # seconds
+OCR_MIN_CONFIDENCE = float(os.getenv("OCR_MIN_CONFIDENCE", "0.35"))
+OCR_UPSCALE_FACTOR = float(os.getenv("OCR_UPSCALE_FACTOR", "1.5"))
+OCR_PREPROCESS_MODE = os.getenv("OCR_PREPROCESS_MODE", "standard").strip().lower()
+OCR_THEME = os.getenv("OCR_THEME", "auto").strip().lower()  # auto, dark, light
+OCR_FULL_PANEL = os.getenv("OCR_FULL_PANEL", "true").lower() in ("true", "1", "yes")
+OCR_MULTI_PASS = os.getenv("OCR_MULTI_PASS", "false").lower() in ("true", "1", "yes")
+OCR_SEMANTIC_ENABLED = os.getenv("OCR_SEMANTIC_ENABLED", "true").lower() in ("true", "1", "yes")
+_default_ui_layout = Path(__file__).resolve().parent / "vision" / "tradingview_ui_layout.default.json"
+TRADINGVIEW_UI_LAYOUT_PATH = os.getenv("TRADINGVIEW_UI_LAYOUT_PATH", str(_default_ui_layout))
 
 # Browser Configuration
 BROWSER_TYPE = os.getenv("BROWSER_TYPE", "chrome")  # chrome, firefox, edge
@@ -145,6 +154,10 @@ def get_config_summary() -> dict:
         "tts_enabled": TTS_ENABLED,
         "log_level": LOG_LEVEL,
         "scan_interval": SCAN_INTERVAL,
+        "ocr_engine": OCR_ENGINE,
+        "ocr_semantic_enabled": OCR_SEMANTIC_ENABLED,
+        "ocr_preprocess_mode": OCR_PREPROCESS_MODE,
+        "ocr_full_panel": OCR_FULL_PANEL,
     }
 
 # Startup warning for live trading
