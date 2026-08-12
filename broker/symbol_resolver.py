@@ -65,8 +65,8 @@ def resolve_venue_symbol(tradingview_ticker: str, venue: str) -> str:
 def _fallback_heuristic(tradingview_ticker: str, venue: str) -> str:
     """Best-effort mapping when JSON has no explicit row."""
     s = tradingview_ticker.strip().upper()
-    if venue == "binance":
-        # BINANCE:BTCUSDT -> BTCUSDT
+    if venue in ("binance", "mcp", "crypto"):
+        # BINANCE:BTCUSDT -> BTCUSDT (MCP crypto venues usually want native pairs)
         if ":" in s:
             parts = s.split(":", 1)
             if len(parts) == 2 and re.match(r"^[A-Z0-9]{4,}$", parts[1]):
@@ -74,7 +74,7 @@ def _fallback_heuristic(tradingview_ticker: str, venue: str) -> str:
         # Already native
         if re.match(r"^[A-Z0-9]{4,}$", s):
             return s
-    if venue == "mock":
+    if venue in ("mock", "tradingview"):
         if ":" in s:
             return s.split(":", 1)[1]
         return s

@@ -59,8 +59,9 @@ _default_ui_layout = Path(__file__).resolve().parent / "vision" / "tradingview_u
 TRADINGVIEW_UI_LAYOUT_PATH = os.getenv("TRADINGVIEW_UI_LAYOUT_PATH", str(_default_ui_layout))
 
 # Chart data (API / venue first recommended):
-#   api_first = REST OHLCV for crypto + OCR only for gaps; API wins on price fields vs pixels
-#   hybrid    = merge API + OCR; binance = API-only when possible; vision = OCR only
+#   api_first = REST/MCP OHLCV + OCR only for gaps; API wins on price fields vs pixels
+#   hybrid    = merge API + OCR; binance = Binance API-only when possible;
+#   mcp       = MCP market-data servers only; vision = OCR only
 CHART_DATA_SOURCE = os.getenv("CHART_DATA_SOURCE", "api_first").strip().lower()
 BINANCE_PUBLIC_BASE_URL = os.getenv(
     "BINANCE_PUBLIC_BASE_URL", "https://api.binance.com"
@@ -69,16 +70,36 @@ BINANCE_PUBLIC_BASE_URL = os.getenv(
 CHART_DATA_SKIP_OCR_WHEN_API = os.getenv(
     "CHART_DATA_SKIP_OCR_WHEN_API", "true"
 ).lower() in ("true", "1", "yes")
-# Fetch Binance klines before opening browser (lower latency when both run)
+# Fetch API/MCP prices before opening browser (lower latency when both run)
 CHART_FETCH_API_BEFORE_BROWSER = os.getenv(
     "CHART_FETCH_API_BEFORE_BROWSER", "true"
 ).lower() in ("true", "1", "yes")
 # Run YOLO on screenshot (pattern / UI context). Set false for pure API path when skipping browser.
 SCAN_USE_YOLO = os.getenv("SCAN_USE_YOLO", "true").lower() in ("true", "1", "yes")
-# If true + crypto + API ok + YOLO off: skip TradingView browser entirely (fastest; no chart patterns)
+# If true + API ok + YOLO off: skip TradingView browser entirely (fastest; no chart patterns)
 SCAN_SKIP_BROWSER_WHEN_API_ONLY = os.getenv(
     "SCAN_SKIP_BROWSER_WHEN_API_ONLY", "false"
 ).lower() in ("true", "1", "yes")
+
+# =============================================================================
+# MCP PLATFORM INTEGRATIONS (TradingView MCP, crypto MCPs, etc.)
+# =============================================================================
+MCP_ENABLED = os.getenv("MCP_ENABLED", "false").lower() in ("true", "1", "yes")
+_default_mcp_servers = Path(__file__).resolve().parent / "mcp_bridge" / "servers.default.json"
+MCP_SERVERS_PATH = os.getenv("MCP_SERVERS_PATH", str(_default_mcp_servers))
+# Preferred registry server names (must exist in MCP_SERVERS_PATH JSON)
+MCP_MARKET_DATA_SERVER = os.getenv("MCP_MARKET_DATA_SERVER", "tradingview").strip()
+MCP_BROKER_SERVER = os.getenv("MCP_BROKER_SERVER", "crypto").strip()
+# Provider order for API price fetches: mcp, binance (comma-separated)
+# Used when CHART_DATA_SOURCE is api_first/hybrid/binance/mcp
+_market_data_providers_raw = os.getenv("MARKET_DATA_PROVIDERS", "binance")
+MARKET_DATA_PROVIDERS = [
+    p.strip().lower()
+    for p in _market_data_providers_raw.split(",")
+    if p.strip()
+]
+if not MARKET_DATA_PROVIDERS:
+    MARKET_DATA_PROVIDERS = ["binance"]
 
 # Browser Configuration
 BROWSER_TYPE = os.getenv("BROWSER_TYPE", "chrome")  # chrome, firefox, edge
@@ -155,13 +176,35 @@ def validate_config() -> bool:
     if CIRCUIT_BREAKER_FAILURE_THRESHOLD < 1:
         errors.append("CIRCUIT_BREAKER_FAILURE_THRESHOLD must be >= 1")
 
-    _chart_sources = ("vision", "binance", "hybrid", "api_first")
+    _chart_sources = ("vision", "binance", "hybrid", "api_first", "mcp")
     if CHART_DATA_SOURCE not in _chart_sources:
         errors.append(
             f"CHART_DATA_SOURCE must be one of {_chart_sources}, got {CHART_DATA_SOURCE!r}"
         )
     if RISK_FEE_ROUND_TRIP_BPS < 0 or RISK_SPREAD_BPS < 0 or RISK_SLIPPAGE_BPS < 0:
         errors.append("RISK_*_BPS values must be non-negative")
+
+    _allowed_md_providers = {"binance", "mcp"}
+    for prov in MARKET_DATA_PROVIDERS:
+        if prov not in _allowed_md_providers:
+            errors.append(
+                f"MARKET_DATA_PROVIDERS entry {prov!r} invalid; "
+                f"allowed: {sorted(_allowed_md_providers)}"
+            )
+
+    if MCP_ENABLED and CHART_DATA_SOURCE == "mcp" and "mcp" not in MARKET_DATA_PROVIDERS:
+        # Soft auto-fix is fine; warn via log only
+        logging.info(
+            "CHART_DATA_SOURCE=mcp — ensure MARKET_DATA_PROVIDERS includes 'mcp' "
+            "and an enabled market_data server in %s",
+            MCP_SERVERS_PATH,
+        )
+
+    if LIVE_TRADING and BROKER_NAME == "mcp":
+        if not MCP_ENABLED:
+            errors.append("BROKER_NAME=mcp requires MCP_ENABLED=true")
+        if not MCP_BROKER_SERVER:
+            errors.append("MCP_BROKER_SERVER is required when BROKER_NAME=mcp")
 
     if errors:
         for error in errors:
@@ -200,6 +243,11 @@ def get_config_summary() -> dict:
         "chart_fetch_api_before_browser": CHART_FETCH_API_BEFORE_BROWSER,
         "scan_use_yolo": SCAN_USE_YOLO,
         "scan_skip_browser_when_api_only": SCAN_SKIP_BROWSER_WHEN_API_ONLY,
+        "mcp_enabled": MCP_ENABLED,
+        "mcp_servers_path": MCP_SERVERS_PATH,
+        "mcp_market_data_server": MCP_MARKET_DATA_SERVER,
+        "mcp_broker_server": MCP_BROKER_SERVER,
+        "market_data_providers": MARKET_DATA_PROVIDERS,
         "risk_apply_friction": RISK_APPLY_FRICTION,
         "risk_friction_bps": RISK_FRICTION_BPS if RISK_APPLY_FRICTION else 0,
         "risk_fee_round_trip_bps": RISK_FEE_ROUND_TRIP_BPS,

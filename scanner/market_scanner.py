@@ -92,6 +92,65 @@ def _try_binance_klines(asset: Asset, timeframe: str) -> Optional[PriceData]:
         logger.debug("Market data API skipped: %s", e)
         return None
 
+
+def _try_mcp_price(asset: Asset, timeframe: str) -> Optional[PriceData]:
+    try:
+        from mcp_bridge.market_data import try_mcp_market_data
+
+        return try_mcp_market_data(asset, timeframe)
+    except Exception as e:
+        logger.debug("MCP market data skipped: %s", e)
+        return None
+
+
+def _provider_order(chart_source: str) -> List[str]:
+    """Resolve MARKET_DATA_PROVIDERS with chart-source overrides."""
+    try:
+        from config import MARKET_DATA_PROVIDERS
+        providers = list(MARKET_DATA_PROVIDERS)
+    except ImportError:
+        providers = ["binance"]
+
+    src = (chart_source or "").strip().lower()
+    if src == "mcp":
+        return ["mcp"]
+    if src == "binance":
+        return ["binance"]
+    # api_first / hybrid: honor configured order; ensure sensible default
+    return providers or ["binance"]
+
+
+def _try_api_price_data(asset: Asset, timeframe: str, chart_source: str) -> Optional[PriceData]:
+    """
+    Fetch PriceData from configured providers (MCP platforms and/or Binance public REST).
+    MCP can serve stocks/commodities via TradingView MCP; Binance is crypto-only.
+    """
+    for provider in _provider_order(chart_source):
+        if provider == "mcp":
+            pd = _try_mcp_price(asset, timeframe)
+            if pd is not None:
+                return pd
+        elif provider == "binance":
+            if asset.market_type != MarketType.CRYPTO:
+                continue
+            pd = _try_binance_klines(asset, timeframe)
+            if pd is not None:
+                return pd
+    return None
+
+
+def _api_source_label(chart_source: str) -> str:
+    order = _provider_order(chart_source)
+    if order == ["mcp"]:
+        return "mcp"
+    if order == ["binance"]:
+        return "binance_public_api"
+    if "mcp" in order and "binance" in order:
+        return "api_mcp+binance"
+    if "mcp" in order:
+        return "mcp"
+    return "binance_public_api"
+
 @dataclass
 class ScanResult:
     """Result of scanning a single asset."""
@@ -193,19 +252,15 @@ class MarketScanner:
                 SCAN_SKIP_BROWSER_WHEN_API_ONLY = False
 
             src = (CHART_DATA_SOURCE or "vision").strip().lower()
-            use_crypto_api = (
-                src in ("binance", "hybrid", "api_first")
-                and asset.market_type == MarketType.CRYPTO
-            )
+            use_api = src in ("binance", "hybrid", "api_first", "mcp")
 
             api_pd: Optional[PriceData] = None
-            if use_crypto_api and CHART_FETCH_API_BEFORE_BROWSER:
-                api_pd = _try_binance_klines(asset, timeframe)
+            if use_api and CHART_FETCH_API_BEFORE_BROWSER:
+                api_pd = _try_api_price_data(asset, timeframe, src)
 
             skip_browser = (
                 SCAN_SKIP_BROWSER_WHEN_API_ONLY
                 and api_pd is not None
-                and asset.market_type == MarketType.CRYPTO
                 and not SCAN_USE_YOLO
             )
 
@@ -227,8 +282,8 @@ class MarketScanner:
                     result.errors.append("Failed to take screenshot")
                     return result
 
-                if use_crypto_api and not CHART_FETCH_API_BEFORE_BROWSER:
-                    api_pd = _try_binance_klines(asset, timeframe)
+                if use_api and not CHART_FETCH_API_BEFORE_BROWSER:
+                    api_pd = _try_api_price_data(asset, timeframe, src)
 
                 if SCAN_USE_YOLO and self.yolo_detector and result.screenshot_path:
                     result.pattern_analysis = self.yolo_detector.analyze_chart_screenshot(
@@ -244,11 +299,9 @@ class MarketScanner:
 
             skip_ocr = False
             if api_pd:
-                if src == "binance":
+                if src in ("binance", "mcp", "api_first"):
                     skip_ocr = True
                 elif src == "hybrid" and CHART_DATA_SKIP_OCR_WHEN_API:
-                    skip_ocr = True
-                elif src == "api_first":
                     skip_ocr = True
 
             if (
@@ -272,19 +325,19 @@ class MarketScanner:
                 else:
                     result.errors.append("Could not load screenshot for OCR")
 
+            api_label = _api_source_label(src)
+
             if skip_browser:
                 result.price_data = api_pd
-                result.chart_data_source = "binance_public_api"
+                result.chart_data_source = api_label
                 result.decision_price_source = "api"
             elif src == "vision":
                 result.price_data = ocr_merged
                 result.chart_data_source = "vision_ocr"
                 result.decision_price_source = "ocr"
-            elif src == "binance":
+            elif src in ("binance", "mcp"):
                 result.price_data = api_pd or ocr_merged
-                result.chart_data_source = (
-                    "binance_public_api" if api_pd else "vision_ocr"
-                )
+                result.chart_data_source = api_label if api_pd else "vision_ocr"
                 result.decision_price_source = "api" if api_pd else "ocr"
             elif src == "hybrid":
                 result.price_data = _merge_api_first(api_pd, ocr_merged)
@@ -292,7 +345,7 @@ class MarketScanner:
                     result.chart_data_source = "hybrid_api+ocr"
                     result.decision_price_source = "merged"
                 elif api_pd:
-                    result.chart_data_source = "binance_public_api"
+                    result.chart_data_source = api_label
                     result.decision_price_source = "api"
                 else:
                     result.chart_data_source = "vision_ocr"
@@ -303,7 +356,7 @@ class MarketScanner:
                     result.chart_data_source = "api_first_api+ocr"
                     result.decision_price_source = "merged"
                 elif api_pd:
-                    result.chart_data_source = "binance_public_api"
+                    result.chart_data_source = api_label
                     result.decision_price_source = "api"
                 else:
                     result.chart_data_source = "vision_ocr"

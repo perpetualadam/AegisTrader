@@ -99,6 +99,13 @@ def display_startup_info():
     print(f"Kill switch: {'ON (no new orders)' if config.get('kill_switch') else 'off'}")
     print(f"Order rate cap: {config.get('max_orders_per_minute', 30)}/min")
     print(f"Audit log: {'on' if config.get('audit_log_enabled') else 'off'}")
+    print(f"MCP: {'enabled' if config.get('mcp_enabled') else 'off'}")
+    if config.get("mcp_enabled"):
+        print(
+            f"  market data server: {config.get('mcp_market_data_server')} | "
+            f"broker server: {config.get('mcp_broker_server')}"
+        )
+        print(f"  providers: {', '.join(config.get('market_data_providers') or [])}")
     print("="*60)
 
 def display_market_status():
@@ -333,6 +340,13 @@ def main():
         if tts_feedback:
             tts_feedback.announce_system_status("AegisTrader shutting down")
             tts_feedback.stop_worker()
+
+        try:
+            from mcp_bridge.client import reset_mcp_manager
+
+            reset_mcp_manager()
+        except Exception:
+            pass
         
         display_final_summary()
         
