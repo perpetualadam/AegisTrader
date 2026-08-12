@@ -1,0 +1,124 @@
+{
+  "version": 1,
+  "description": "Registry of external MCP servers AegisTrader can use for market data, screening, and brokerage.",
+  "servers": {
+    "tradingview": {
+      "enabled": false,
+      "transport": "stdio",
+      "command": "npx",
+      "args": ["-y", "tradingview-mcp"],
+      "cwd": null,
+      "env": {},
+      "url": null,
+      "roles": ["market_data", "screener"],
+      "tools": {
+        "get_quote": ["get_quote", "get_quotes", "quote", "get_multiple_quotes"],
+        "get_ohlcv": [
+          "get_historical_data",
+          "get_ohlcv",
+          "historical_data",
+          "get_candles",
+          "get_klines"
+        ],
+        "technical_analysis": ["get_technical_analysis", "technical_analysis"],
+        "screen": ["screen_crypto", "get_screener", "screen_stocks", "screener"]
+      },
+      "args_schema": {
+        "get_quote": { "symbol": ["symbol", "ticker", "symbols"] },
+        "get_ohlcv": {
+          "symbol": ["symbol", "ticker"],
+          "timeframe": ["interval", "timeframe", "resolution"]
+        }
+      }
+    },
+    "crypto": {
+      "enabled": false,
+      "transport": "stdio",
+      "command": "npx",
+      "args": ["-y", "crypto-mcp"],
+      "cwd": null,
+      "env": {
+        "API_KEY": "${BROKER_API_KEY}",
+        "API_SECRET": "${BROKER_API_SECRET}"
+      },
+      "url": null,
+      "roles": ["market_data", "broker"],
+      "tools": {
+        "get_quote": ["get_ticker", "get_price", "get_quote", "ticker"],
+        "get_ohlcv": ["get_klines", "get_candles", "get_ohlcv", "klines"],
+        "place_order": ["place_order", "create_order", "submit_order"],
+        "cancel_order": ["cancel_order", "cancel"],
+        "get_order": ["get_order", "get_order_status", "order_status"],
+        "get_balance": ["get_balance", "get_balances", "balances"],
+        "get_positions": ["get_positions", "positions"],
+        "get_account": ["get_account", "get_account_info", "account"]
+      },
+      "args_schema": {
+        "get_quote": { "symbol": ["symbol", "ticker", "pair"] },
+        "get_ohlcv": {
+          "symbol": ["symbol", "ticker", "pair"],
+          "timeframe": ["interval", "timeframe", "resolution"]
+        },
+        "place_order": {
+          "symbol": ["symbol", "pair"],
+          "side": ["side"],
+          "quantity": ["quantity", "qty", "amount", "size"],
+          "order_type": ["order_type", "type"],
+          "price": ["price", "limit_price"],
+          "client_order_id": ["client_order_id", "clientOrderId"]
+        },
+        "cancel_order": {
+          "order_id": ["order_id", "id"],
+          "symbol": ["symbol", "pair"]
+        },
+        "get_order": {
+          "order_id": ["order_id", "id"],
+          "symbol": ["symbol", "pair"]
+        }
+      }
+    },
+    "binance_mcp": {
+      "enabled": false,
+      "transport": "http",
+      "command": null,
+      "args": [],
+      "cwd": null,
+      "env": {},
+      "url": "http://127.0.0.1:8000/mcp",
+      "roles": ["market_data", "broker"],
+      "tools": {
+        "get_quote": ["get_ticker", "get_price", "get_quote"],
+        "get_ohlcv": ["get_klines", "get_ohlcv", "klines"],
+        "place_order": ["place_order", "create_order"],
+        "cancel_order": ["cancel_order"],
+        "get_order": ["get_order", "get_order_status"],
+        "get_balance": ["get_balance", "get_balances"],
+        "get_positions": ["get_positions"],
+        "get_account": ["get_account", "get_account_info"]
+      },
+      "args_schema": {
+        "get_quote": { "symbol": ["symbol"] },
+        "get_ohlcv": {
+          "symbol": ["symbol"],
+          "timeframe": ["interval", "timeframe"]
+        },
+        "place_order": {
+          "symbol": ["symbol"],
+          "side": ["side"],
+          "quantity": ["quantity", "qty", "amount"],
+          "order_type": ["type", "order_type"],
+          "price": ["price"],
+          "client_order_id": ["client_order_id", "newClientOrderId"]
+        },
+        "cancel_order": {
+          "order_id": ["order_id", "orderId"],
+          "symbol": ["symbol"]
+        },
+        "get_order": {
+          "order_id": ["order_id", "orderId"],
+          "symbol": ["symbol"]
+        }
+      }
+    }
+  }
+}

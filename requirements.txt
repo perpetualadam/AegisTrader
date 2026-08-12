@@ -40,6 +40,10 @@ python-binance>=1.0.19
 # alpaca-trade-api>=2.3.0 # For Alpaca integration
 # ib-insync>=0.9.70       # For Interactive Brokers
 
+# MCP client bridge (TradingView MCP, crypto MCP servers, etc.)
+# Requires Python 3.10+. Disable via MCP_ENABLED=false if unused.
+mcp>=1.28,<3
+
 # Development and testing
 pytest>=6.2.0
 pytest-cov>=2.12.0

@@ -282,6 +282,10 @@ def create_broker_api(broker_name: str, api_key: str, api_secret: str,
         from broker.binance_spot import BinanceSpotBroker
 
         return BinanceSpotBroker(api_key, api_secret, sandbox)
+    elif broker_name == "mcp":
+        from mcp_bridge.broker import MCPBroker
+
+        return MCPBroker(api_key, api_secret, sandbox)
     else:
         logger.warning(f"Unknown broker '{broker_name}', using mock broker")
         return MockBrokerAPI(api_key, api_secret, sandbox)

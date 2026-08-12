@@ -9,6 +9,7 @@ A sophisticated Python trading bot that uses computer vision to analyze TradingV
 ## 🚀 Features
 
 - **Vision-Based Analysis**: Uses YOLO for chart pattern detection and OCR for price extraction
+- **MCP Platform Bridge**: Connect TradingView MCP, crypto MCP servers, and other MCP tools for market data and brokerage ([guide](docs/MCP_INTEGRATION.md))
 - **Multi-Market Support**: Crypto (24/7), UK stocks, and commodities with timezone awareness
 - **Browser Automation**: Selenium-based TradingView chart navigation
 - **Multiple Strategies**: Momentum, mean reversion, breakout, pattern recognition, multi-timeframe
@@ -19,10 +20,11 @@ A sophisticated Python trading bot that uses computer vision to analyze TradingV
 
 ## 📋 Requirements
 
-- Python 3.8+
+- Python 3.8+ (3.10+ recommended when using MCP integrations)
 - Chrome/Firefox browser
 - TradingView account (free tier works)
 - Tesseract OCR (optional: EasyOCR, PaddleOCR)
+- Optional: MCP servers for TradingView / crypto platforms
 
 ## 🛠️ Installation
 
@@ -262,6 +264,7 @@ Logs are stored in the `logs/` directory:
 - **[🔧 Troubleshooting Guide](docs/TROUBLESHOOTING.md)** - Common issues and solutions
 - **[🚀 Deployment Guide](docs/DEPLOYMENT.md)** - Local and cloud deployment instructions
 - **[🔗 API Integration Guide](docs/API_INTEGRATION.md)** - Broker API setup and integration
+- **[🔌 MCP Integration Guide](docs/MCP_INTEGRATION.md)** - TradingView / crypto MCP servers
 - **[🧠 Strategy Development Guide](docs/STRATEGY_GUIDE.md)** - Creating custom trading strategies
 
 ### Quick Links

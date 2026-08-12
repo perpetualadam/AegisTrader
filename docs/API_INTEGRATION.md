@@ -25,10 +25,13 @@ AegisTrader uses an abstract broker API interface that allows easy integration w
 | Broker | Status | Markets | Sandbox |
 |--------|--------|---------|---------|
 | Mock Broker | ✅ Complete | All | Yes |
-| Binance | 🚧 Template | Crypto | Yes |
+| Binance | ✅ Spot (testnet/live) | Crypto | Yes |
+| MCP Broker | ✅ Via platform MCP servers | Varies by server | Server-dependent |
 | Alpaca | 🚧 Template | US Stocks | Yes |
 | Interactive Brokers | 🚧 Template | Global | Yes |
 | CCXT (Multi-Exchange) | 📋 Planned | Crypto | Varies |
+
+For TradingView / crypto **MCP** servers (market data + brokerage), see **[MCP Integration](MCP_INTEGRATION.md)**.
 
 ## 🏛️ Broker API Architecture
 
