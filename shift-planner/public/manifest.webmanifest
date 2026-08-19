@@ -1,7 +1,7 @@
 {
   "name": "Plastics Shift",
   "short_name": "B Shift",
-  "description": "Plastics B Shift planner — 2-2-4 rota, alarms, overtime & pay.",
+  "description": "Plastics B Shift planner — 2-2-3 rota, alarms, overtime & pay.",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",

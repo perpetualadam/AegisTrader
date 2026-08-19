@@ -6,7 +6,7 @@ Personal offline-first PWA for **Plastics B Shift** (yellow boxes on the 2026 ro
 
 - **2 day shifts** · 06:00–18:00  
 - **2 night shifts** · 18:00–06:00  
-- **4 days off**  
+- **3 days off**  
 - Anchored to the printed 2026 Plastics rota (first day block: **3–4 Jan 2026**)
 
 ## Features
@@ -31,7 +31,7 @@ Open [http://localhost:3000](http://localhost:3000). On your phone: open the URL
 
 ## Deploy as its own app
 
-This folder is a complete Next.js app. Point a new GitHub repo at `shift-planner/` (or copy its contents to repo root) and deploy to Vercel:
+This folder is a complete Next.js app. Point a new GitHub repo at this project root and deploy to Vercel:
 
 ```bash
 npm run build && npm start

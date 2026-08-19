@@ -17,7 +17,7 @@ const body = Figtree({
 export const metadata: Metadata = {
   title: "Plastics Shift — B Shift Planner",
   description:
-    "Offline-first B Shift planner for Plastics 2-2-4 rota. Alarms, reminders, overtime and pay tracking.",
+    "Offline-first B Shift planner for Plastics 2-2-3 rota. Alarms, reminders, overtime and pay tracking.",
   applicationName: "Plastics Shift",
   appleWebApp: {
     capable: true,

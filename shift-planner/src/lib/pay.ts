@@ -140,8 +140,8 @@ export function yearToDatePay(data: AppData, asOf: Date = new Date()): PayBreakd
 }
 
 export function estimatedAnnual(data: AppData): number {
-  // Rough: ~182.5 work days/year on 2-2-4 (half of 365)
-  const workDaysPerYear = (4 / 8) * 365.25;
+  // Rough: 4 work days per 7-day cycle on 2-2-3
+  const workDaysPerYear = (4 / 7) * 365.25;
   const hours = workDaysPerYear * 12;
   const base = hours * data.settings.hourlyRate;
   const nightsShare = 0.5;

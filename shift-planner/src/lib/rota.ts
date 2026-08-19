@@ -1,11 +1,11 @@
-/** Plastics B-Shift rota — 2 days / 2 nights / 4 off (8-day cycle) */
+/** Plastics B-Shift rota — 2 days / 2 nights / 3 off (7-day cycle) */
 
 export type ShiftKind = "day" | "night" | "off";
 
 export type ShiftDay = {
   date: Date;
   kind: ShiftKind;
-  /** Position within the 8-day cycle (0–7) */
+  /** Position within the 7-day cycle (0–6) */
   cycleDay: number;
   label: string;
   startHour: number | null;
@@ -15,10 +15,10 @@ export type ShiftDay = {
 
 /**
  * Anchor: first Day shift of a cycle.
- * From Plastics 2026 rota (yellow B): Jan 3–4 days, Jan 5–6 nights, Jan 7–10 off.
+ * From Plastics 2026 rota (yellow B): Jan 3–4 days, Jan 5–6 nights, then 3 off.
  */
 export const CYCLE_ANCHOR = new Date(2026, 0, 3);
-export const CYCLE_LENGTH = 8;
+export const CYCLE_LENGTH = 7;
 export const DAY_SHIFT_HOURS = 12;
 export const NIGHT_SHIFT_HOURS = 12;
 export const SHIFT_NAME = "B Shift";
@@ -28,7 +28,6 @@ const CYCLE_PATTERN: ShiftKind[] = [
   "day",
   "night",
   "night",
-  "off",
   "off",
   "off",
   "off",
@@ -204,7 +203,7 @@ export function cycleLegend(): { kind: ShiftKind; days: number; label: string }[
   return [
     { kind: "day", days: 2, label: "2 day shifts" },
     { kind: "night", days: 2, label: "2 night shifts" },
-    { kind: "off", days: 4, label: "4 days off" },
+    { kind: "off", days: 3, label: "3 days off" },
   ];
 }
 

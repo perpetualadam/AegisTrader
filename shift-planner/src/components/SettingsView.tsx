@@ -46,7 +46,7 @@ export function SettingsView() {
             />
           </label>
         </div>
-        <p className="help">Locked to Plastics B rota: 2 days · 2 nights · 4 off · 12h (06–18 / 18–06).</p>
+        <p className="help">Locked to Plastics B rota: 2 days · 2 nights · 3 off · 12h (06–18 / 18–06).</p>
       </section>
 
       <section className="panel">
@@ -164,7 +164,7 @@ export function SettingsView() {
         <h2>Plastics Shift</h2>
         <p>
           Personal B-shift planner — offline-first PWA. Pattern matched to your 2026 Plastics rota
-          (yellow boxes): 2 day, 2 night, 4 off.
+          (yellow boxes): 2 day, 2 night, 3 off.
         </p>
         <p className="fineprint">v0.1 · data stays on your phone</p>
       </section>

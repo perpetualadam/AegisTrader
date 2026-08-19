@@ -1,0 +1,7 @@
+{
+  "/alarms/page": "app/alarms/page.js",
+  "/calendar/page": "app/calendar/page.js",
+  "/page": "app/page.js",
+  "/pay/page": "app/pay/page.js",
+  "/settings/page": "app/settings/page.js"
+}
