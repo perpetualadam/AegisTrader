@@ -196,3 +196,5 @@ trades_*.csv
 *.tar.gz
 *.rar
 *.7z
+shift-planner/node_modules/
+shift-planner/.next/
