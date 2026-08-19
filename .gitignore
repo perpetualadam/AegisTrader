@@ -19,6 +19,8 @@ downloads/
 eggs/
 .eggs/
 lib/
+!shift-planner/src/lib/
+!shift-planner/src/lib/**
 lib64/
 parts/
 sdist/
@@ -114,6 +116,8 @@ screenshots/
 *.jpeg
 *.gif
 *.bmp
+!shift-planner/public/icons/*.png
+!shift-planner/src/app/favicon.ico
 
 # Models and weights
 models/
